@@ -6,8 +6,8 @@ import re
 from datetime import datetime
 
 # ================= KONFIGURASI UTAMA =================
-SERVICE_TOKEN = "" # Akan diisi secara dinamis dari file input pengguna
-DEVICE_ID = "34CBE0634577D8D82C74096FFAADCBFE544F089A" 
+SERVICE_TOKEN = "" 
+DEVICE_ID = "" 
 LOG_FILE = "xiaomi_global_bot_debug.log"
 # =====================================================
 
@@ -52,6 +52,11 @@ def organic_delay():
     logger.info(f"⏳ Jeda interaksi {jeda} detik...")
     time.sleep(jeda)
 
+def generate_device_id():
+    """Menghasilkan 40 karakter Hexadecimal acak untuk Device ID baru"""
+    chars = "0123456789ABCDEF"
+    return "".join(random.choices(chars, k=40))
+
 def refresh_csrf_token():
     global CSRF_TOKEN
     logger.info("🔑 Menghubungkan ke server dan mengambil Data Akun...")
@@ -86,7 +91,7 @@ def refresh_csrf_token():
                 print("="*50 + "\n")
                 return True
         elif data.get("code") == 100004:
-            logger.critical("   ❌ [FATAL] Token Cookie mati! Sesi sniffing Anda telah berakhir.")
+            logger.critical("   ❌ [FATAL] Token Cookie mati atau salah! Sesi untuk akun ini gagal.")
         return False
     except Exception as e:
         logger.error(f"   ↳ Error penyegaran data: {e}")
@@ -147,7 +152,6 @@ def get_task_status():
         return {}
 
 def claim_task(task_id, silent=False):
-    """Fungsi klaim kini dieksekusi instan tanpa jeda time.sleep"""
     if not silent:
         logger.info(f"🎁 Mengklaim Poin untuk Task ID: {task_id}...")
         
@@ -273,113 +277,136 @@ def like_other_comment(post_id):
 # --- ALUR UTAMA PROGRAM ---
 
 def main():
-    global SERVICE_TOKEN
-    logger.info("=== 🤖 Memulai Bot Auto-Task V8.5 ===")
+    global SERVICE_TOKEN, DEVICE_ID, CSRF_TOKEN
+    logger.info("=== 🤖 Memulai Bot Auto-Task V8.6 (Smart Multi-Account) ===")
     
     # 0. Setup File Input
     print("\n" + "="*50)
-    file_path = input("📂 Masukkan nama file text Service Token (contoh: token.txt): ").strip()
+    file_path = input("📂 Masukkan nama file text daftar akun (contoh: akun.txt): ").strip()
     print("="*50 + "\n")
     
     try:
         with open(file_path, 'r', encoding='utf-8') as file:
-            SERVICE_TOKEN = file.read().strip()
-            logger.info(f"✅ Berhasil membaca token dari '{file_path}'")
+            lines = [line.strip() for line in file.readlines() if line.strip()]
+            logger.info(f"✅ Berhasil memuat {len(lines)} baris data dari '{file_path}'")
     except FileNotFoundError:
-        logger.critical(f"❌ File '{file_path}' tidak ditemukan! Pastikan file berada di folder yang sama dengan script.")
+        logger.critical(f"❌ File '{file_path}' tidak ditemukan! Pastikan file berada di folder yang sama.")
         return
 
-    if not SERVICE_TOKEN or "MASUKKAN" in SERVICE_TOKEN:
-        logger.critical("❌ TOKEN KOSONG ATAU TIDAK VALID! Periksa kembali isi file text Anda.")
-        return
+    # Loop melalui setiap baris akun di dalam file
+    for index, line in enumerate(lines, 1):
+        print("\n" + "#"*60)
+        logger.info(f"🚀 MEMPROSES AKUN KE-{index} DARI {len(lines)}")
+        print("#"*60)
+
+        # Cek apakah ada separator "|" untuk Device ID
+        parts = line.split('|')
+        SERVICE_TOKEN = parts[0].strip()
+        CSRF_TOKEN = "" # Reset CSRF Token
         
-    if not refresh_csrf_token(): return
-    
-    tasks = get_task_status()
-    if not tasks: return
+        # Logika Autentikasi Device ID Baru
+        if len(parts) >= 2 and parts[1].strip():
+            DEVICE_ID = parts[1].strip()
+        else:
+            DEVICE_ID = generate_device_id()
+            logger.info(f"   ⚙️ Device ID tidak ditemukan. Membuat ID acak: {C_CYAN}{DEVICE_ID}{C_RES}")
 
-    # 1. Sapu Bersih Klaim Lama
-    has_silent_claims = False
-    for t_id, t_data in tasks.items():
-        if t_data["remaining"] == 0:
-            if claim_task(t_id, silent=True):
-                has_silent_claims = True
-    if has_silent_claims: print("-" * 50)
-
-    # 2. Eksekusi Check-in
-    if tasks.get(8, {}).get("remaining", 0) > 0:
-        do_check_in()
-        claim_task(8, silent=False) # Klaim Instan
-
-    post_ids = get_featured_posts()
-    if not post_ids:
-        logger.error("❌ Gagal memuat postingan beranda.")
-        return
-
-    # 3. Eksekusi Follow Secara Sequential
-    t11_data = tasks.get(11, {})
-    rem_11 = t11_data.get("remaining", 0)
-    fin_11 = t11_data.get("finish", 0)
-    tot_11 = t11_data.get("total", 0)
-
-    if rem_11 > 0:
-        logger.info(f"▶️ Mengeksekusi Task Follow: Kurang {rem_11} lagi...")
-        for pid in reversed(post_ids): 
-            if rem_11 <= 0: break
-            if follow_random_user_from_post(pid):
-                fin_11 += 1
-                rem_11 -= 1
-                logger.info(f"   ↳ Progres Task Follow: ({fin_11}/{tot_11})")
-                claim_task(11, silent=False) # Klaim Instan
-                organic_delay()
-
-    # 4. Eksekusi Interaksi Postingan Secara Sequential
-    t1_data = tasks.get(1, {}); rem_1 = t1_data.get("remaining", 0); fin_1 = t1_data.get("finish", 0); tot_1 = t1_data.get("total", 0)
-    t4_data = tasks.get(4, {}); rem_4 = t4_data.get("remaining", 0); fin_4 = t4_data.get("finish", 0); tot_4 = t4_data.get("total", 0)
-    t6_data = tasks.get(6, {}); rem_6 = t6_data.get("remaining", 0); fin_6 = t6_data.get("finish", 0); tot_6 = t6_data.get("total", 0)
-    t7_data = tasks.get(7, {}); rem_7 = t7_data.get("remaining", 0); fin_7 = t7_data.get("finish", 0); tot_7 = t7_data.get("total", 0)
-
-    max_post = max(rem_1, rem_4, rem_6, rem_7)
-    if max_post > 0:
-        logger.info(f"▶️ Mengeksekusi interaksi postingan. Membutuhkan {max_post} post...")
-        for i in range(max_post):
-            if i >= len(post_ids): break
-            pid = post_ids[i]
+        if not SERVICE_TOKEN:
+            logger.warning(f"⚠️ Token kosong pada baris ke-{index}. Melewati...")
+            continue
             
-            if rem_1 > 0:
-                read_post(pid)
-                fin_1 += 1
-                rem_1 -= 1
-                logger.info(f"   ↳ Progres Baca Post: ({fin_1}/{tot_1})")
-                claim_task(1, silent=False) # Klaim Instan
+        if not refresh_csrf_token():
+            logger.warning(f"⏭️ Gagal memuat data pengguna untuk akun ke-{index}. Melewati...")
+            continue
+        
+        tasks = get_task_status()
+        if not tasks: 
+            logger.warning(f"⏭️ Gagal memuat daftar tugas untuk akun ke-{index}. Melewati...")
+            continue
 
-            if rem_4 > 0:
-                like_post(pid)
-                fin_4 += 1
-                rem_4 -= 1
-                logger.info(f"   ↳ Progres Like Post: ({fin_4}/{tot_4})")
-                claim_task(4, silent=False) # Klaim Instan
+        # 1. Sapu Bersih Klaim Lama
+        has_silent_claims = False
+        for t_id, t_data in tasks.items():
+            if t_data["remaining"] == 0:
+                if claim_task(t_id, silent=True):
+                    has_silent_claims = True
+        if has_silent_claims: print("-" * 50)
 
-            if rem_6 > 0:
-                comment_post(pid)
-                fin_6 += 1
-                rem_6 -= 1
-                logger.info(f"   ↳ Progres Komentar: ({fin_6}/{tot_6})")
-                claim_task(6, silent=False) # Klaim Instan
+        # 2. Eksekusi Check-in
+        if tasks.get(8, {}).get("remaining", 0) > 0:
+            do_check_in()
+            claim_task(8, silent=False) 
 
-            if rem_7 > 0:
-                like_other_comment(pid)
-                fin_7 += 1
-                rem_7 -= 1
-                logger.info(f"   ↳ Progres Like Komentar: ({fin_7}/{tot_7})")
-                claim_task(7, silent=False) # Klaim Instan
+        post_ids = get_featured_posts()
+        if not post_ids:
+            logger.error("❌ Gagal memuat postingan beranda untuk interaksi.")
+            continue
 
-            if i < (max_post - 1): 
-                print("-" * 50)
+        # 3. Eksekusi Follow Secara Sequential
+        t11_data = tasks.get(11, {})
+        rem_11 = t11_data.get("remaining", 0)
+        fin_11 = t11_data.get("finish", 0)
+        tot_11 = t11_data.get("total", 0)
 
-    # 5. Laporan Akhir
-    show_task_list()
-    logger.info("=== 🎉 Seluruh Siklus Telah Optimal Selesai ===")
+        if rem_11 > 0:
+            logger.info(f"▶️ Mengeksekusi Task Follow: Kurang {rem_11} lagi...")
+            for pid in reversed(post_ids): 
+                if rem_11 <= 0: break
+                if follow_random_user_from_post(pid):
+                    fin_11 += 1
+                    rem_11 -= 1
+                    logger.info(f"   ↳ Progres Task Follow: ({fin_11}/{tot_11})")
+                    claim_task(11, silent=False) 
+                    organic_delay()
+
+        # 4. Eksekusi Interaksi Postingan Secara Sequential
+        t1_data = tasks.get(1, {}); rem_1 = t1_data.get("remaining", 0); fin_1 = t1_data.get("finish", 0); tot_1 = t1_data.get("total", 0)
+        t4_data = tasks.get(4, {}); rem_4 = t4_data.get("remaining", 0); fin_4 = t4_data.get("finish", 0); tot_4 = t4_data.get("total", 0)
+        t6_data = tasks.get(6, {}); rem_6 = t6_data.get("remaining", 0); fin_6 = t6_data.get("finish", 0); tot_6 = t6_data.get("total", 0)
+        t7_data = tasks.get(7, {}); rem_7 = t7_data.get("remaining", 0); fin_7 = t7_data.get("finish", 0); tot_7 = t7_data.get("total", 0)
+
+        max_post = max(rem_1, rem_4, rem_6, rem_7)
+        if max_post > 0:
+            logger.info(f"▶️ Mengeksekusi interaksi postingan. Membutuhkan {max_post} post...")
+            for i in range(max_post):
+                if i >= len(post_ids): break
+                pid = post_ids[i]
+                
+                if rem_1 > 0:
+                    read_post(pid)
+                    fin_1 += 1
+                    rem_1 -= 1
+                    logger.info(f"   ↳ Progres Baca Post: ({fin_1}/{tot_1})")
+                    claim_task(1, silent=False)
+
+                if rem_4 > 0:
+                    like_post(pid)
+                    fin_4 += 1
+                    rem_4 -= 1
+                    logger.info(f"   ↳ Progres Like Post: ({fin_4}/{tot_4})")
+                    claim_task(4, silent=False) 
+
+                if rem_6 > 0:
+                    comment_post(pid)
+                    fin_6 += 1
+                    rem_6 -= 1
+                    logger.info(f"   ↳ Progres Komentar: ({fin_6}/{tot_6})")
+                    claim_task(6, silent=False) 
+
+                if rem_7 > 0:
+                    like_other_comment(pid)
+                    fin_7 += 1
+                    rem_7 -= 1
+                    logger.info(f"   ↳ Progres Like Komentar: ({fin_7}/{tot_7})")
+                    claim_task(7, silent=False)
+
+                if i < (max_post - 1): 
+                    print("-" * 50)
+
+        # 5. Laporan Akhir Akun
+        show_task_list()
+        
+    logger.info("\n=== 🎉 SELURUH SIKLUS MULTI-AKUN TELAH OPTIMAL SELESAI ===")
 
 if __name__ == "__main__":
     main()
