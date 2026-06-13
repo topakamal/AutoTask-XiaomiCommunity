@@ -5,6 +5,17 @@ import logging
 import re
 from datetime import datetime
 
+# ================= INTEGRASI MODUL QUOTES =================
+try:
+    from quotes import get_quote
+    HAS_QUOTES_MODULE = True
+except ImportError:
+    HAS_QUOTES_MODULE = False
+    print("⚠️ Modul 'quotes.py' tidak ditemukan di folder yang sama. Bot akan menggunakan teks default.")
+    def get_quote(tema="", mood="", bahasa=""):
+        return f"Hello everyone! Have a great day and stay safe! #{random.randint(1000, 9999)}"
+# ==========================================================
+
 # ================= KONFIGURASI UTAMA =================
 SERVICE_TOKEN = "" 
 DEVICE_ID = "" 
@@ -137,7 +148,6 @@ def get_task_status():
         logger.info(f"   ↳ Respons: {C_GREEN}Berhasil Memuat Data{C_RES}")
         for task in res.json().get("data", {}).get("list", []):
             t_id = task.get("task_id")
-            if t_id == 2: continue 
             
             total = task.get("total")
             finish = task.get("finish")
@@ -182,7 +192,7 @@ def show_task_list():
     res = safe_request("GET", url_list)
     if res and res.json().get("code") == 0:
         task_names = {
-            1: "Lihat Postingan", 2: "Membuat Post (Skip)",
+            1: "Lihat Postingan", 2: "Membuat Post", 
             4: "Menyukai Post", 6: "Membuat Komentar",
             7: "Menyukai Komentar", 8: "Check-in Harian",
             11: "Mengikuti User"
@@ -226,6 +236,52 @@ def follow_random_user_from_post(post_id):
                 return True
         else:
             logger.warning("   ⚠️ Tidak ada pengguna di kolom komentar ini. Lewati.")
+    return False
+
+def create_post():
+    """Fungsi baru untuk membuat post dengan endpoint /message/create dan deteksi Captcha"""
+    logger.info("📝 Mengeksekusi Task: Membuat Postingan (Message) Baru...")
+    
+    # 1. Generate konten menggunakan quotes.py
+    tema_pilihan = random.choice(["technology", "smartphone", "gadgets", "daily life", "motivation"])
+    mood_pilihan = random.choice(["casual", "funny", "inspirational", "friendly", "cool"])
+    
+    if HAS_QUOTES_MODULE:
+        logger.info(f"   ↳ Mengambil teks AI dari Google Script (Tema: {tema_pilihan}, Mood: {mood_pilihan})...")
+        
+    post_text = get_quote(tema=tema_pilihan, mood=mood_pilihan, bahasa="English")
+    
+    # Fallback pencegahan jika API error
+    if "Maaf" in post_text or "Terjadi kesalahan" in post_text:
+        post_text = f"Hello everyone! Having a great time exploring the features. Have a safe day! #{random.randint(1000, 9999)}"
+        
+    logger.info(f"   ↳ Generated Text: {C_CYAN}{post_text[:60]}...{C_RES}")
+    
+    # 2. Eksekusi Request
+    url = "https://sgp-api.buy.mi.com/bbs/api/global/message/create"
+    payload = {
+        "xfc_uuid": "",
+        "is_help": 0,
+        "filter_uuid": "",
+        "text_content": post_text,
+        "summary": post_text[:50] + "..." if len(post_text) > 50 else post_text,
+        "blocks": ""
+    }
+    
+    res = safe_request("POST", url, payload)
+    if res:
+        data = res.json()
+        if data.get("code") == 0:
+            logger.info(f"   ↳ Respons: {C_GREEN}Post berhasil dibuat!{C_RES}")
+            return True
+        else:
+            msg = str(data.get("msg", "")).lower()
+            code = data.get("code")
+            if "captcha" in msg or "spam" in msg:
+                logger.warning(f"   ⚠️ Terdeteksi sistem keamanan (Captcha/Spam block): {data.get('msg')}")
+                return "captcha"
+            else:
+                logger.info(f"   ↳ Respons Gagal: {C_YELLOW}{res.text}{C_RES}")
     return False
 
 def read_post(post_id):
@@ -278,7 +334,7 @@ def like_other_comment(post_id):
 
 def main():
     global SERVICE_TOKEN, DEVICE_ID, CSRF_TOKEN
-    logger.info("=== 🤖 Memulai Bot Auto-Task V8.6 (Smart Multi-Account) ===")
+    logger.info("=== 🤖 Memulai Bot Auto-Task V8.9 (Smart Multi-Account + AI Quote Post) ===")
     
     # 0. Setup File Input
     print("\n" + "="*50)
@@ -337,12 +393,31 @@ def main():
             do_check_in()
             claim_task(8, silent=False) 
 
+        # 3. Eksekusi Create Post (Task 2) dengan Bypass Captcha & AI Text
+        t2_data = tasks.get(2, {})
+        rem_2 = t2_data.get("remaining", 0)
+        fin_2 = t2_data.get("finish", 0)
+        tot_2 = t2_data.get("total", 0)
+
+        if rem_2 > 0:
+            logger.info(f"▶️ Mengeksekusi Task Create Post: Kurang {rem_2} lagi...")
+            for _ in range(rem_2):
+                status = create_post()
+                if status == "captcha":
+                    logger.warning("   ⏭️ Melewati sisa task Create Post untuk akun ini karena dicegat Captcha.")
+                    break
+                elif status is True:
+                    fin_2 += 1
+                    logger.info(f"   ↳ Progres Buat Post: ({fin_2}/{tot_2})")
+                    claim_task(2, silent=False)
+                organic_delay()
+
         post_ids = get_featured_posts()
         if not post_ids:
             logger.error("❌ Gagal memuat postingan beranda untuk interaksi.")
             continue
 
-        # 3. Eksekusi Follow Secara Sequential
+        # 4. Eksekusi Follow Secara Sequential
         t11_data = tasks.get(11, {})
         rem_11 = t11_data.get("remaining", 0)
         fin_11 = t11_data.get("finish", 0)
@@ -359,7 +434,7 @@ def main():
                     claim_task(11, silent=False) 
                     organic_delay()
 
-        # 4. Eksekusi Interaksi Postingan Secara Sequential
+        # 5. Eksekusi Interaksi Postingan Secara Sequential
         t1_data = tasks.get(1, {}); rem_1 = t1_data.get("remaining", 0); fin_1 = t1_data.get("finish", 0); tot_1 = t1_data.get("total", 0)
         t4_data = tasks.get(4, {}); rem_4 = t4_data.get("remaining", 0); fin_4 = t4_data.get("finish", 0); tot_4 = t4_data.get("total", 0)
         t6_data = tasks.get(6, {}); rem_6 = t6_data.get("remaining", 0); fin_6 = t6_data.get("finish", 0); tot_6 = t6_data.get("total", 0)
@@ -403,7 +478,7 @@ def main():
                 if i < (max_post - 1): 
                     print("-" * 50)
 
-        # 5. Laporan Akhir Akun
+        # 6. Laporan Akhir Akun
         show_task_list()
         
     logger.info("\n=== 🎉 SELURUH SIKLUS MULTI-AKUN TELAH OPTIMAL SELESAI ===")
