@@ -251,7 +251,6 @@ def create_post():
         
     post_text = get_quote(tema=tema_pilihan, mood=mood_pilihan, bahasa="English")
     
-    # Fallback pencegahan jika API error
     if "Maaf" in post_text or "Terjadi kesalahan" in post_text:
         post_text = f"Hello everyone! Having a great time exploring the features. Have a safe day! #{random.randint(1000, 9999)}"
         
@@ -334,38 +333,63 @@ def like_other_comment(post_id):
 
 def main():
     global SERVICE_TOKEN, DEVICE_ID, CSRF_TOKEN
-    logger.info("=== 🤖 Memulai Bot Auto-Task V8.9 (Smart Multi-Account + AI Quote Post) ===")
+    logger.info("=== 🤖 Memulai Bot Auto-Task V9.0 (Smart Multi-Account + Auto-Save Device ID) ===")
     
-    # 0. Setup File Input
+    # 0. Setup & Validasi File Input
     print("\n" + "="*50)
     file_path = input("📂 Masukkan nama file text daftar akun (contoh: akun.txt): ").strip()
     print("="*50 + "\n")
     
     try:
+        # Membaca seluruh data file
         with open(file_path, 'r', encoding='utf-8') as file:
-            lines = [line.strip() for line in file.readlines() if line.strip()]
-            logger.info(f"✅ Berhasil memuat {len(lines)} baris data dari '{file_path}'")
+            raw_lines = [line.strip() for line in file.readlines() if line.strip()]
+            logger.info(f"✅ Berhasil memuat {len(raw_lines)} baris data dari '{file_path}'")
+            
+        updated_lines = []
+        file_needs_update = False
+        
+        # Pengecekan pra-eksekusi: Menyematkan Device ID ke token yang kosong
+        for line in raw_lines:
+            parts = line.split('|')
+            token = parts[0].strip()
+            
+            # Jika sudah memiliki Token dan Device ID
+            if len(parts) >= 2 and parts[1].strip():
+                device_id = parts[1].strip()
+                updated_lines.append(f"{token}|{device_id}")
+            # Jika hanya memiliki Token (tanpa pemisah / Device ID kosong)
+            else:
+                new_device_id = generate_device_id()
+                logger.info(f"   ⚙️ Token tanpa Device ID terdeteksi. Membuat ID acak: {C_CYAN}{new_device_id}{C_RES}")
+                updated_lines.append(f"{token}|{new_device_id}")
+                file_needs_update = True
+                
+        # Simpan kembali ke file teks agar permanen
+        if file_needs_update:
+            with open(file_path, 'w', encoding='utf-8') as file:
+                for updated_line in updated_lines:
+                    file.write(updated_line + '\n')
+            logger.info(f"💾 File '{file_path}' berhasil diperbarui dan disimpan secara permanen!")
+            
+        # Terapkan list yang sudah valid untuk dijalankan oleh Bot
+        lines = updated_lines
+            
     except FileNotFoundError:
         logger.critical(f"❌ File '{file_path}' tidak ditemukan! Pastikan file berada di folder yang sama.")
         return
 
-    # Loop melalui setiap baris akun di dalam file
+    # Loop eksekusi utama melalui setiap baris akun
     for index, line in enumerate(lines, 1):
         print("\n" + "#"*60)
         logger.info(f"🚀 MEMPROSES AKUN KE-{index} DARI {len(lines)}")
         print("#"*60)
 
-        # Cek apakah ada separator "|" untuk Device ID
+        # Karena data sudah di-filter di atas, dijamin selalu ada Token dan Device ID
         parts = line.split('|')
         SERVICE_TOKEN = parts[0].strip()
-        CSRF_TOKEN = "" # Reset CSRF Token
-        
-        # Logika Autentikasi Device ID Baru
-        if len(parts) >= 2 and parts[1].strip():
-            DEVICE_ID = parts[1].strip()
-        else:
-            DEVICE_ID = generate_device_id()
-            logger.info(f"   ⚙️ Device ID tidak ditemukan. Membuat ID acak: {C_CYAN}{DEVICE_ID}{C_RES}")
+        DEVICE_ID = parts[1].strip()
+        CSRF_TOKEN = "" # Reset CSRF Token untuk sesi akun baru
 
         if not SERVICE_TOKEN:
             logger.warning(f"⚠️ Token kosong pada baris ke-{index}. Melewati...")
